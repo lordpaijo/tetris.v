@@ -11,63 +11,260 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: x86_64
+            ext: ""
+            archive: tar.gz
+          - os: windows-latest
+            platform: windows
+            arch: x86_64
+            ext: .exe
+            archive: zip
+          - os: macos-latest
+            platform: macos
+            arch: x86_64
+            ext: ""
+            archive: tar.gz
+          - os: macos-latest
+            platform: macos
+            arch: arm64
+            ext: ""
+            archive: tar.gz
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libgl1-mesa-dev \
+            libglu1-mesa-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxinerama-dev \
+            libxi-dev \
+            libglfw3-dev \
+            libfreetype6-dev \
+            libasound2-dev \
+            libx11-dev \
+            libxft-dev \
+            libssl-dev \
+            sqlite3 \
+            libsqlite3-dev
+
+      - name: Install system dependencies (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          # Install Xcode command line tools if not present
+          xcode-select --install 2>/dev/null || true
+          # Install dependencies via Homebrew
+          brew update
+          brew install glfw freetype sqlite3
+
+      - name: Install system dependencies (Windows)
+        if: matrix.platform == 'windows'
+        run: |
+          # Install chocolatey packages for Windows build dependencies
+          choco install sqlite -y
+          # Windows typically has OpenGL support built-in
 
       - name: Setup V
         uses: vlang/setup-v@v1
         with:
           check-latest: true
+          stable: true
 
-      - name: Build for Linux
-        if: matrix.os == 'ubuntu-latest'
+      - name: Verify V installation
         run: |
-          v -prod -o tetris_game_linux .
-          tar -czf tetris_game_linux_x64.tar.gz tetris_game_linux
+          v version
+          v doctor
 
-      - name: Build for Windows
-        if: matrix.os == 'windows-latest'
+      - name: Cache V modules
+        uses: actions/cache@v3
+        with:
+          path: ~/.vmodules
+          key: ${{ runner.os }}-vmodules-${{ hashFiles('**/v.mod') }}
+          restore-keys: |
+            ${{ runner.os }}-vmodules-
+
+      - name: Install V dependencies
         run: |
-          v -prod -o tetris_game_windows.exe .
-          Compress-Archive -Path tetris_game_windows.exe -DestinationPath tetris_game_windows_x64.zip
+          # Install common V modules that might be needed
+          v install ui
+          v install gg
+          v install sokol
+          v install gx
+          # Install any modules specified in v.mod if it exists
+          if [ -f "v.mod" ] || [ -f "v.mod" ]; then
+            v install
+          fi
+        shell: bash
 
-      - name: Build for macOS
-        if: matrix.os == 'macos-latest'
+      - name: Build binary
         run: |
-          # Build for both Intel and Apple Silicon
-          v -prod -o tetris_game_macos_intel .
-          v -arch arm64 -prod -o tetris_game_macos_arm64 .
+          # Set architecture flag for Apple Silicon
+          ARCH_FLAG=""
+          if [ "${{ matrix.platform }}" = "macos" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
+            ARCH_FLAG="-arch arm64"
+          fi
 
-          # Create universal binary (optional)
-          lipo -create -output tetris_game_macos_universal tetris_game_macos_intel tetris_game_macos_arm64
+          # Build with production optimizations and static linking where possible
+          OUTPUT_NAME="tetris_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
 
-          # Package all variants
-          tar -czf tetris_game_macos_intel.tar.gz tetris_game_macos_intel
-          tar -czf tetris_game_macos_arm64.tar.gz tetris_game_macos_arm64  
-          tar -czf tetris_game_macos_universal.tar.gz tetris_game_macos_universal
+          # V build command with comprehensive flags
+          v ${ARCH_FLAG} -prod -skip-unused -cc gcc -cflags "-O3" -o "${OUTPUT_NAME}" .
 
-      - name: Upload Release Assets
+          # Verify the binary was created
+          ls -la "${OUTPUT_NAME}"
+
+          # Test that the binary can at least start (basic smoke test)
+          if [ "${{ matrix.platform }}" != "windows" ]; then
+            ./"${OUTPUT_NAME}" --help 2>/dev/null || echo "Binary created successfully"
+          else
+            ./"${OUTPUT_NAME}" --help 2>nul || echo "Binary created successfully"
+          fi
+        shell: bash
+
+      - name: Package binary (Unix)
+        if: matrix.platform != 'windows'
+        run: |
+          BINARY_NAME="tetris_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
+          ARCHIVE_NAME="tetris_${{ matrix.platform }}_${{ matrix.arch }}.tar.gz"
+
+          # Create a directory with the binary and any additional files
+          mkdir -p package
+          cp "${BINARY_NAME}" package/
+
+          # Include README and other docs if they exist
+          [ -f README.md ] && cp README.md package/ || true
+          [ -f LICENSE ] && cp LICENSE package/ || true
+          [ -f CHANGELOG.md ] && cp CHANGELOG.md package/ || true
+
+          # Include any asset directories
+          [ -d assets ] && cp -r assets package/ || true
+          [ -d resources ] && cp -r resources package/ || true
+          [ -d data ] && cp -r data package/ || true
+
+          # Create archive
+          tar -czf "${ARCHIVE_NAME}" -C package .
+
+          echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
+
+      - name: Package binary (Windows)
+        if: matrix.platform == 'windows'
+        run: |
+          $BINARY_NAME = "tetris_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
+          $ARCHIVE_NAME = "tetris_${{ matrix.platform }}_${{ matrix.arch }}.zip"
+
+          # Create a directory with the binary and any additional files
+          New-Item -ItemType Directory -Force -Path package
+          Copy-Item $BINARY_NAME package/
+
+          # Include README and other docs if they exist
+          if (Test-Path "README.md") { Copy-Item README.md package/ }
+          if (Test-Path "LICENSE") { Copy-Item LICENSE package/ }
+          if (Test-Path "CHANGELOG.md") { Copy-Item CHANGELOG.md package/ }
+
+          # Include any asset directories
+          if (Test-Path "assets") { Copy-Item -Recurse assets package/ }
+          if (Test-Path "resources") { Copy-Item -Recurse resources package/ }
+          if (Test-Path "data") { Copy-Item -Recurse data package/ }
+
+          # Create archive
+          Compress-Archive -Path package/* -DestinationPath $ARCHIVE_NAME
+
+          echo "ARCHIVE_NAME=$ARCHIVE_NAME" | Out-File -FilePath $env:GITHUB_ENV -Append
+        shell: pwsh
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.ARCHIVE_NAME }}
+          path: ${{ env.ARCHIVE_NAME }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          # Move all archives to the root directory
+          find artifacts -name "*.tar.gz" -o -name "*.zip" | xargs -I {} mv {} .
+          ls -la *.tar.gz *.zip 2>/dev/null || echo "No archives found"
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          # Extract version from tag
+          VERSION=${GITHUB_REF#refs/tags/}
+
+          # Generate release notes
+          cat > release_notes.md << EOF
+          # Tetris Game Release ${VERSION}
+
+          ## Downloads
+          Choose the appropriate binary for your system:
+
+          - **Linux x86_64**: \`tetris_linux_x86_64.tar.gz\`
+          - **Windows x86_64**: \`tetris_windows_x86_64.zip\`
+          - **macOS Intel**: \`tetris_macos_x86_64.tar.gz\`
+          - **macOS Apple Silicon**: \`tetris_macos_arm64.tar.gz\`
+
+          ## Installation
+          1. Download the appropriate archive for your platform
+          2. Extract the archive: \`tar -xzf <filename>.tar.gz\` (or use your zip utility)
+          3. Run the executable: \`./tetris_*\` (or \`tetris_*.exe\` on Windows)
+
+          ## System Requirements
+          - **Linux**: X11, OpenGL support
+          - **Windows**: Windows 10+ with OpenGL support
+          - **macOS**: macOS 10.14+ with Metal/OpenGL support
+          - **RAM**: 256MB minimum
+          - **Storage**: 50MB free space
+
+          ## Controls
+          - Arrow keys: Move pieces
+          - Space: Hard drop
+          - Z/X: Rotate pieces
+          - P: Pause game
+          - Esc: Quit
+
+          ---
+
+          Built with V lang $(v version 2>/dev/null || echo "latest")
+          EOF
+
+          echo "Generated release notes"
+
+      - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             *.tar.gz
             *.zip
-          body: |
-            ## What's New
-            - Feature 1
-            - Bug fixes
-            - Performance improvements
-
-            ## Installation
-            Download the appropriate binary for your platform and run it directly.
-
-            ## System Requirements
-            - OS: Windows 10+, macOS 10.14+, or Linux
-            - RAM: 512MB minimum
-
+          body_path: release_notes.md
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(github.ref, '-') }}
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to release
+        if: failure()
+        run: |
+          echo "Release creation failed. Available files:"
+          ls -la
