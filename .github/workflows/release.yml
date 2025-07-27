@@ -1,0 +1,73 @@
+# .github/workflows/release.yml
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup V
+        uses: vlang/setup-v@v1
+        with:
+          check-latest: true
+
+      - name: Build for Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          v -prod -o tetris_game_linux .
+          tar -czf tetris_game_linux_x64.tar.gz tetris_game_linux
+
+      - name: Build for Windows
+        if: matrix.os == 'windows-latest'
+        run: |
+          v -prod -o tetris_game_windows.exe .
+          Compress-Archive -Path tetris_game_windows.exe -DestinationPath tetris_game_windows_x64.zip
+
+      - name: Build for macOS
+        if: matrix.os == 'macos-latest'
+        run: |
+          # Build for both Intel and Apple Silicon
+          v -prod -o tetris_game_macos_intel .
+          v -arch arm64 -prod -o tetris_game_macos_arm64 .
+
+          # Create universal binary (optional)
+          lipo -create -output tetris_game_macos_universal tetris_game_macos_intel tetris_game_macos_arm64
+
+          # Package all variants
+          tar -czf tetris_game_macos_intel.tar.gz tetris_game_macos_intel
+          tar -czf tetris_game_macos_arm64.tar.gz tetris_game_macos_arm64  
+          tar -czf tetris_game_macos_universal.tar.gz tetris_game_macos_universal
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            *.tar.gz
+            *.zip
+          body: |
+            ## What's New
+            - Feature 1
+            - Bug fixes
+            - Performance improvements
+
+            ## Installation
+            Download the appropriate binary for your platform and run it directly.
+
+            ## System Requirements
+            - OS: Windows 10+, macOS 10.14+, or Linux
+            - RAM: 512MB minimum
+
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
