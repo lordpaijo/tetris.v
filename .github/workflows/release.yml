@@ -106,19 +106,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-vmodules-
 
-      - name: Install V dependencies
-        run: |
-          # Install common V modules that might be needed
-          v install ui
-          v install gg
-          v install sokol
-          v install gx
-          # Install any modules specified in v.mod if it exists
-          if [ -f "v.mod" ] || [ -f "v.mod" ]; then
-            v install
-          fi
-        shell: bash
-
       - name: Build binary
         run: |
           # Set architecture flag for Apple Silicon
