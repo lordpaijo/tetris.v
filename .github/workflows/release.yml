@@ -94,7 +94,7 @@ jobs:
           echo "Working directory: $(pwd)"
           echo "Files in directory:"
           ls -la
-          echo "=== V Environment ==="
+          ls V Environment ==="
           which v
           v --help | head -10
 
@@ -121,7 +121,7 @@ jobs:
           v ${ARCH_FLAG} -prod -skip-unused -cc gcc -cflags "-O3" -o "${OUTPUT_NAME}" .
 
           # Verify the binary was created
-          ls -la "${OUTPUT_NAME}"
+          ls "${OUTPUT_NAME}"
 
           # Test that the binary can at least start (basic smoke test)
           if [ "${{ matrix.platform }}" != "windows" ]; then
@@ -204,7 +204,7 @@ jobs:
         run: |
           # Move all archives to the root directory
           find artifacts -name "*.tar.gz" -o -name "*.zip" | xargs -I {} mv {} .
-          ls -la *.tar.gz *.zip 2>/dev/null || echo "No archives found"
+          ls *.tar.gz *.zip 2>/dev/null || echo "No archives found"
 
       - name: Generate release notes
         id: release_notes
@@ -267,4 +267,4 @@ jobs:
         if: failure()
         run: |
           echo "Release creation failed. Available files:"
-          ls -la
+          ls
