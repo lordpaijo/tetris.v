@@ -10,6 +10,7 @@ highscore.txt
 
 # Ignore binary output folders
 bin/
+builds/
 
 # Ignore common editor/system specific metadata
 .DS_Store

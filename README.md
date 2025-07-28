@@ -6,4 +6,6 @@ A tetris clone made in vlang.
 
 > [!TODO]
 >
-> Add audio support to play theme song and various other sfx.
+> - Add audio support to play theme song and various other sfx.
+>
+> - Good release method!
